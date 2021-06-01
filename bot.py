@@ -58,7 +58,7 @@ class Player:
     def increase_balance(self, money):
         """Увеличить баланс"""
         self.balance += money
-        update_balance_bd(cash=self.balance, user_id=player.user_id)
+        update_balance_bd(cash=self.balance, user_id=self.user_id)
 
     def take_bonus(self):
         """Получить бонус"""
@@ -67,7 +67,7 @@ class Player:
             self.increase_balance(BONUS_SIZE)
             write_time_to_bd(dtime=str(datetime.now()), user_id=self.user_id)
 
-            answer = f'\U0001F381 Вы получили бонус\n\nТеперь ваш баланс составляет {sep_balance(player.get_balance())}$' \
+            answer = f'\U0001F381 Вы получили бонус\n\nТеперь ваш баланс составляет {sep_balance(self.get_balance())}$' \
                      f'\n\n\U0001F550 Получить следующий бонус можно через' \
                      f' {(TIME_TO_TAKE_BONUS - (datetime.now() - self.time_get_bonus).seconds) // 60} минут'
         else:
@@ -77,8 +77,34 @@ class Player:
         return answer
 
 
-player = Player()
-dealer = Player()
+player_dict = {}
+dealer_dict = {}
+bot = telebot.TeleBot(token)
+
+
+@bot.message_handler(content_types=['text'])
+def get_text_messages(message):
+    """Обработка сообщений"""
+    if message.text == '/menu' or message.text == '\U000025AA Меню' or message.text == '/start':
+        menu(message)
+
+    if message.text == '\U0001F0CF Играть':
+        play_game(message)
+
+    if message.text == '\U0001F4B0 Баланс':
+        balance(message.chat.id)
+
+    if message.text == '\U0001F3C6 ТОП':
+        show_stat(message.chat.id)
+
+    if message.text == '\U0001F4D1 Правила':
+        show_rules(message.chat.id)
+
+    if message.text == '\U0001F381 Получить бонус':
+        get_bonus(message.chat.id)
+
+    if message.text == '\U0001F503 Сыграть ещё':
+        play_game(message)
 
 
 def show_keyboard() -> object:
@@ -95,11 +121,12 @@ def menu(message):
         add_player_db(user_id=message.from_user.id, username=message.from_user.username, start_balnce=START_BALANCE)
         return
 
+    player = Player()
     player.user_id = message.from_user.id
-    print(player.user_id)
     player.username = message.from_user.username
     player.balance = int(query[0].get('balance'))
     player.time_get_bonus = from_str_to_date(query[0].get('time_get_bonus'))
+    player_dict[player.user_id] = player
 
     keyboard = types.ReplyKeyboardMarkup(True)
     keyboard.row('\U0001F0CF Играть', )
@@ -128,7 +155,7 @@ def show_stat(chat_id):
     bot.send_message(chat_id, stat)
 
 
-def show_rules(message):
+def show_rules(chat_id):
     """Показывает правила игры"""
     answer = '\U0001F3AF Цель игры: Набрать 21 очко\n\n' \
              '\U0001F0CF Игрок и дилер набирают карты, выигрывает тот, кто максимально приблизится к 21 очку,' \
@@ -138,52 +165,29 @@ def show_rules(message):
              'Дама - 3 очка\n' \
              'Король - 4 очка\n' \
              'Туз - 11 очков'
-    bot.send_message(message.chat.id, answer)
+    bot.send_message(chat_id, answer)
 
 
-def balance(message):
+def balance(chat_id):
     """Показать баланс"""
+    player = player_dict.get(chat_id)
     keyboard = types.ReplyKeyboardMarkup(True)
     keyboard.row('\U000025AA Меню', '\U0001F381 Получить бонус')
     sep_balance(player.get_balance())
     answer = f'\U0001F4B8 Ваш баланс: {sep_balance(player.get_balance())}$'
-    bot.send_message(message.chat.id, answer, reply_markup=keyboard)
+    bot.send_message(chat_id, answer, reply_markup=keyboard)
 
 
-bot = telebot.TeleBot(token)
-
-
-@bot.message_handler(content_types=['text'])
-def get_text_messages(message):
-    """Обработка сообщений"""
-    global player
-
-    if message.text == '/menu' or message.text == '\U000025AA Меню' or message.text == '/start':
-        menu(message)
-
-    if message.text == '\U0001F0CF Играть':
-        play_game(message)
-
-    if message.text == '\U0001F4B0 Баланс':
-        balance(message)
-
-    if message.text == '\U0001F3C6 ТОП':
-        show_stat(message.chat.id)
-
-    if message.text == '\U0001F4D1 Правила':
-        show_rules(message)
-
-    if message.text == '\U0001F381 Получить бонус':
-        answer = player.take_bonus()
-        bot.send_message(message.chat.id, answer)
-
-    if message.text == '\U0001F503 Сыграть ещё':
-        play_game(message)
-
+def get_bonus(chat_id):
+    """Получить бонус"""
+    player = player_dict.get(chat_id)
+    answer = player.take_bonus()
+    bot.send_message(chat_id, answer)
 
 
 def play_game(message):
     """Играть"""
+    player = player_dict.get(message.chat.id)
     keyboard = types.ReplyKeyboardMarkup(True)
     keyboard.row('\U000025AA Меню')
     keyboard.row('\U0001F4B3 Баланс: ' + sep_balance(player.get_balance()) + '$')
@@ -196,7 +200,7 @@ def play_game(message):
 
 def place_a_bet(message):
     """Сделать ставку"""
-    global player
+    player = player_dict.get(message.chat.id)
 
     try:
         bet = abs(int(message.text))
@@ -213,7 +217,10 @@ def place_a_bet(message):
 
 def start_game(message, bet):
     """Начало игры"""
-    global dealer, player
+    dealer = Player()
+    dealer_dict[message.chat.id] = dealer
+    player = player_dict.get(message.chat.id)
+
     dealer.clear_stack()
     player.clear_stack()
 
@@ -240,7 +247,9 @@ def game_step(message):
     Взять - игрок берет дополнительную карту
     Хватит - набор карт прекращается
     """
-    global dealer, player
+    dealer = dealer_dict.get(message.chat.id)
+    player = player_dict.get(message.chat.id)
+
     bet = player.get_bet()
 
     if message.text == 'Взять':
@@ -268,7 +277,8 @@ def stop_game(message, bet):
     -У игрока значение больше, чем 21
     -У игрока значение равно 21
     """
-    global player
+    player = player_dict.get(message.chat.id)
+    dealer = dealer_dict.get(message.chat.id)
 
     dealer_answer = f'Карты дилера:\n\n'
     dealer_answer += send_answer_to_player(dealer.values, dealer.cards_list, dealer.suits_list)
